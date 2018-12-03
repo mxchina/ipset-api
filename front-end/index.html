@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0,maximum-scale=1.0, user-scalable=no"/>
+    <title>Title</title>
+    <script src="common/jquery.min-1.11.js"></script>
+    <style>
+        div {
+            height: 50px;
+        }
+
+        .status {
+            background-color: #cccccc;
+        }
+    </style>
+</head>
+<body>
+<div class="status">
+    当前所在组：
+    <div class="group"></div>
+</div>
+<button id="noneToAuth">认证到auth组</button>
+<div id="resultView1"></div>
+<button id="authToNone">从auth组剔除</button>
+<div id="resultView2"></div>
+<button id="authToPermit">auth组认证到permit组</button>
+<div id="resultView3"></div>
+<button id="PermitToNone">从permit组剔除</button>
+<div id="resultView4"></div>
+
+<script>
+    $(function () {
+        var urlBase = "http://172.16.10.80:9800/"
+        getSet()
+        $("#noneToAuth").click(function () {
+            $.ajax({
+                type: "POST",
+                url: urlBase + "moveSet",
+                contentType: "application/x-www-form-urlencoded",
+                dataType: "json", //表示返回值类型，不必须
+                data: "setFrom=none&setTo=Auth",
+                success: function (data) {
+                    $("#resultView2").text("")
+                    $("#resultView3").text("")
+                    $("#resultView4").text("")
+                    $("#resultView1").text("结果：" + JSON.stringify(data))
+                    $(".group").text("auth")
+                    getSet()
+                }
+            })
+        })
+        $("#authToNone").click(function () {
+            $.ajax({
+                type: "POST",
+                url: urlBase + "moveSet",
+                contentType: "application/x-www-form-urlencoded",
+                dataType: "json", //表示返回值类型，不必须
+                data: "setFrom=auth&setTo=none",
+                success: function (data) {
+                    $("#resultView1").text("")
+                    $("#resultView3").text("")
+                    $("#resultView4").text("")
+                    $("#resultView2").text("结果：" + JSON.stringify(data))
+                    $(".group").text("none")
+                    getSet()
+                }
+            })
+        })
+        $("#authToPermit").click(function () {
+            $.ajax({
+                type: "POST",
+                url: urlBase + "moveSet",
+                contentType: "application/x-www-form-urlencoded",
+                dataType: "json", //表示返回值类型，不必须
+                data: "setFrom=auth&setTo=permit",
+                success: function (data) {
+                    $("#resultView1").text("")
+                    $("#resultView2").text("")
+                    $("#resultView4").text("")
+                    $("#resultView3").text("结果：" + JSON.stringify(data))
+                    $(".group").text("permit")
+                    getSet()
+                }
+            })
+        })
+        $("#PermitToNone").click(function () {
+            $.ajax({
+                type: "POST",
+                url: urlBase + "moveSet",
+                contentType: "application/x-www-form-urlencoded",
+                dataType: "json", //表示返回值类型，不必须
+                data: "setFrom=permit&setTo=none",
+                success: function (data) {
+                    $("#resultView2").text("")
+                    $("#resultView3").text("")
+                    $("#resultView1").text("")
+                    $("#resultView4").text("结果：" + JSON.stringify(data))
+                    $(".group").text("none")
+                    getSet()
+                }
+            })
+        })
+
+        function getSet() {
+            $.ajax({
+                type: "GET",
+                url: urlBase + "setFromIP",
+                dataType: "json", //表示返回值类型，不必须
+                success: function (data) {
+                    if (data.code === 0) {
+                        $(".group").text(data.setName)
+                    } else if (data.code === 1) {
+                        $(".group").text("none")
+                    } else {
+                        $(".group").text("请求setName信息失败")
+                    }
+                }
+            })
+        }
+    })
+
+</script>
+
+
+</body>
+</html>

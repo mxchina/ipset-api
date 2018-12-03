@@ -1,0 +1,116 @@
+# For a quick start check out our HTTP Requests collection (Tools|HTTP Client|Open HTTP Requests Collection).
+#
+# Following HTTP Request Live Templates are available:
+# * 'gtrp' and 'gtr' create a GET request with or without query parameters;
+# * 'ptr' and 'ptrp' create a POST request with a simple or parameter-like body;
+# * 'mptr' and 'fptr' create a POST request to submit a form with a text or file field (multipart/form-data);
+
+POST 10.154.55.20:9800/add HTTP/1.1
+#POST 172.16.18.76:9800/add HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+#ip=aaaaaaaa4&setName=Auth
+setName=Auth
+
+#setName Any Auth Weixin Permit
+###
+POST 10.154.55.20:9800/moveSet HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+#ip=aaaaaaaa4&setName=Auth
+setName=Auth
+
+###
+
+POST 10.154.55.20:9800/moveSet HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+#ip=aaaaaaaa4&setName=Auth
+setFrom=none&setTo=Auth
+
+###
+
+POST 10.154.55.20:9800/moveSet HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+#ip=aaaaaaaa4&setName=Auth
+setFrom=Auth&setTo=none
+
+###
+
+POST 10.154.55.20:9800/moveSet HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+#ip=aaaaaaaa4&setName=Auth
+setFrom=permit&setTo=none
+
+###
+
+GET 10.154.55.20:9800/setFromIP HTTP/1.1
+
+###
+POST 10.154.55.20:9800/add HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+#ip=aaaaaaaa4&setName=Auth
+ip=10.1.1.1&setName=Auth
+
+###
+POST 10.154.55.20:9800/del HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+#ip=aaaaaaaa4&setName=Auth
+ip=10.1.1.1&setName=Auth
+
+###
+
+#POST 172.16.10.188:9800/add-list HTTP/1.1
+POST 172.16.10.80:9800/add-list HTTP/1.1
+Content-Type: application/json
+
+#ip=aaaaaaaa4&setName=Auth
+{
+  "authIpList": [
+    "1.1.1.1",
+    "4.4.4.4"
+  ],
+  "permitIpList": []
+}
+
+###
+
+POST 172.16.10.80:9800/del-list HTTP/1.1
+Content-Type: application/json
+
+#ip=aaaaaaaa4&setName=Auth
+{
+  "authIpList": [
+    "1.1.1.1",
+    "4.4.4.4"
+  ],
+  "permitIpList": []
+}
+
+###
+###
+
+POST 172.16.10.80:9800/move-set-list HTTP/1.1
+Content-Type: application/json
+
+#ip=aaaaaaaa4&setName=Auth
+{
+  "SetFrom": "Permit",
+  "SetTo": "none",
+  "IpList": [
+    "1.1.1.1",
+    "4.4.4.4"
+  ]
+}
+
+###Responese
+#{
+#  "code": 0
+#  "SetFrom": "auth",
+#  "SetTo": "permit"
+#}
+###
