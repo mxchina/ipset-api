@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"go_firewall/cmder"
+	"regexp"
 	"strings"
+	"sync"
 )
 
 /*
@@ -17,246 +19,259 @@ name=manu&message=this_is_great
 func main() {
 	router := gin.Default()
 
-	router.GET("/setFromIP", getSeter)
+	mapInit()
 	router.GET("/membersFromSet", getMembers)
+	router.GET("/map-info", getMap)
 	router.POST("/add", adder)
 	router.POST("/del", deleter)
-	router.POST("/add-list", addList)
-	router.POST("/del-list", deleteList)
-	router.POST("/moveSet", moveSeter)
-	router.POST("/move-set-list", moveSetList)
+	router.OPTIONS("/*matchAllOptions", corsOptionsAllow)
+
 	router.Run(":9800")
+}
+
+func corsOptionsAllow(c *gin.Context) {
+	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+	c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	c.JSON(200, nil)
 }
 
 func getMembers(c *gin.Context) {
 	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-}
-
-func getSeter(c *gin.Context) {
-	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-	ip := c.DefaultQuery("ip", c.ClientIP())
-	authCMD := "ipset test Auth " + ip
-	permitCMD := "ipset test Permit " + ip
-	setName := ""
-	if _, err := cmder.Exec_shell(authCMD); err == nil {
-		//ip in Auth
-		setName = "auth"
-	} else {
-		if _, err := cmder.Exec_shell(permitCMD); err == nil {
-			//ip in Permit
-			setName = "permit"
-		} else {
-			// ip not in auth,permit
-			setName = "none"
-		}
-	}
-	c.JSON(200, gin.H{
-		"code":    0,
-		"ip":      ip,
-		"setName": setName,
-	})
-}
-
-func moveSeter(c *gin.Context) {
-	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-	ip := c.DefaultPostForm("ip", c.ClientIP())
-	setFrom := strings.ToLower(c.PostForm("setFrom"))
-	setTo := strings.ToLower(c.PostForm("setTo"))
 	var (
-		cmd  string
-		code = 0
+		setName = c.Query("group")
+		code    = 0
+		cmd     = "ipset list"
+		RE      *regexp.Regexp
 	)
-	if setFrom == "none" && setTo == "auth" {
-		cmd = "ipset add Auth " + ip
+	text, err := cmder.Exec_shell(cmd)
+	switch strings.ToLower(setName) {
+	case "weixin":
+		RE = regexp.MustCompile(`Name: weixin.*Members:\\n(.*)\\n{\nName}.`)
+	case "auth":
+		RE = regexp.MustCompile(`Name: weixin.*Members:\\n(.*)\\n{\nName}.`)
+	case "permit":
+		RE = regexp.MustCompile(`Name: Permit.*Members:\\n(.*?)\\n\\nName: Weixin`)
 	}
-	if setFrom == "auth" && setTo == "permit" {
-		cmd = "ipset del Auth " + ip + " && ipset add Permit " + ip
+	if err != nil {
+		result := RE.FindStringSubmatch(text)
+		var ipList []string
+		if len(result) >= 2 {
+			ipList = strings.Split(result[1], "\\n")
+		} else {
+			ipList = []string{}
+		}
+
+		c.JSON(200, gin.H{
+			"code":    code,
+			"group":   setName,
+			"members": ipList,
+		})
 	}
-	if setFrom == "auth" && setTo == "none" {
-		cmd = "ipset del Auth " + ip
-	}
-	if setFrom == "permit" && setTo == "none" {
-		cmd = "ipset del Permit " + ip
+}
+
+const (
+	weixin int8 = 1
+	all    int8 = 2
+)
+
+//map[string]int8
+var dict sync.Map
+
+type ResErr struct {
+	Msg string
+}
+
+func mapInit() {
+	var (
+		//注意[\s\S]才能匹配任意字符，.匹配不到\n换行符
+		weixinRE = regexp.MustCompile(`Name: weixin[\s\S]*Members:\n([\s\S]*)\n\nName`)
+		allRE    = regexp.MustCompile(`Name: all[\s\S]*Members:\n([\s\S]*)\n\nName`)
+	)
+	//先判断weixin和all两个组，在服务器上ipset list命令后，所显示的位置。
+	//如果有一个组在最后，那么获取该组IP列表的正则表达式不一样。go好像不支持正则表达式(?:)
+	groupList, err := cmder.Exec_shell("ipset list|grep Name")
+	if err == nil {
+		groupList = strings.TrimSpace(groupList)
+		split := strings.Split(groupList, "\n")
+		if strings.HasSuffix(split[len(split)-1], "weixin") {
+			weixinRE = regexp.MustCompile(`Name: weixin[\s\S]*Members:\n([\s\S]*)\n`)
+		}
+		if strings.HasSuffix(split[len(split)-1], "all") {
+			allRE = regexp.MustCompile(`Name: weixin[\s\S]*Members:\n([\s\S]*)\n`)
+		}
+	} else {
+		panic(err)
 	}
 
-	if cmd == "" {
-		code = 1
+	//获取weixin和set两个组中的IP列表
+	text, err := cmder.Exec_shell("ipset list")
+	if err != nil {
+		panic(err)
+	}
+	weixinList := weixinRE.FindStringSubmatch(text)
+	allList := allRE.FindStringSubmatch(text)
+
+	var (
+		weixinIpList []string
+		allIpList    []string
+	)
+
+	if len(weixinList) >= 2 {
+		weixinIpList = strings.Split(weixinList[1], "\n")
 	} else {
-		_, err := cmder.Exec_shell(cmd)
-		if err != nil {
-			code = 1
-			fmt.Println(err)
+		weixinIpList = []string{}
+	}
+
+	if len(allList) >= 2 {
+		allIpList = strings.Split(allList[1], "\n")
+	} else {
+		allIpList = []string{}
+	}
+
+	//遍历添加两个组中的ip到map中，同步服务器ipset数据，完成初始化
+	for _, ip := range weixinIpList {
+		dict.Store(ip, weixin)
+	}
+	for _, ip := range allIpList {
+		dict.Store(ip, all)
+	}
+
+}
+
+func setMap(ip string, group string) error {
+	if group == "weixin" {
+		dict.Store(ip, weixin)
+		return nil
+	} else if group == "all" {
+		dict.Store(ip, all)
+		return nil
+	} else {
+		return fmt.Errorf("setMap error：group %q not exist", group)
+	}
+}
+
+func execAndSetMap(ip, group, action string) error {
+	cmd := "ipset " + action + " " + group + " " + ip
+	_, err := cmder.Exec_shell(cmd)
+	if err != nil {
+		return err
+	}
+	return setMap(ip, group)
+}
+
+func execAndDeleteMap(ip, group, action string) error {
+	cmd := "ipset " + action + " " + group + " " + ip
+	_, err := cmder.Exec_shell(cmd)
+	if err != nil {
+		return err
+	}
+	dict.Delete(ip)
+	return nil
+}
+
+func adder(c *gin.Context) {
+	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+	var (
+		ip     = c.DefaultPostForm("ip", c.ClientIP())
+		group  = strings.ToLower(c.PostForm("group"))
+		resErr ResErr
+		code   = 0
+	)
+	if group != "weixin" && group != "all" {
+		code = 1
+		resErr.Msg = fmt.Errorf("group require weixin or all，got %q", group).Error()
+	} else {
+		groupName, ok := dict.Load(ip)
+		if ok {
+			// ok表示ip已经在map中
+			if groupName == weixin && group == "all" {
+				// 从weixin组到all组，1 从weixin组删除ip 2 添加ip到all组
+				if err := execAndSetMap(ip, "weixin", "del"); err != nil {
+					code = 1
+					resErr.Msg = resErr.Msg + err.Error()
+				} else {
+					if err := execAndSetMap(ip, "all", "add"); err != nil {
+						code = 1
+						resErr.Msg = resErr.Msg + err.Error()
+					}
+				}
+			}
+			if groupName == all && group == "weixin" {
+				//从all组到weixin组，1从all组删除ip 2添加ip到weixin组
+				if err := execAndSetMap(ip, "all", "del"); err != nil {
+					code = 1
+					resErr.Msg = resErr.Msg + err.Error()
+				} else {
+					if err := execAndSetMap(ip, "weixin", "add"); err != nil {
+						code = 1
+						resErr.Msg = resErr.Msg + err.Error()
+					}
+				}
+			}
+		} else {
+			// ip不在map中，也就是不在任何组中
+			if group == "weixin" {
+				if err := execAndSetMap(ip, "weixin", "add"); err != nil {
+					code = 1
+					resErr.Msg = resErr.Msg + err.Error()
+				}
+			}
+			if group == "all" {
+				if err := execAndSetMap(ip, "all", "add"); err != nil {
+					code = 1
+					resErr.Msg = resErr.Msg + err.Error()
+				}
+			}
 		}
 	}
+
 	c.JSON(200, gin.H{
-		"code":    code,
-		"ip":      ip,
-		"setFrom": setFrom,
-		"setTo":   setTo,
+		"code":  code,
+		"err":   resErr,
+		"ip":    ip,
+		"group": group,
 	})
 }
 
 func deleter(c *gin.Context) {
 	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-	ip := c.DefaultPostForm("ip", c.ClientIP())
-	setName := c.PostForm("setName")
-	cmd := "ipset del " + setName + " " + ip
-	_, err := cmder.Exec_shell(cmd)
-	responeseWrap(err, c, ip, setName)
-}
-
-func adder(c *gin.Context) {
-	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-	//id := c.DefaultQuery("qip","")
-	//page := c.DefaultQuery("qSetName", "0")
-	ip := c.DefaultPostForm("ip", c.ClientIP())
-	setName := c.PostForm("setName")
-	cmd := "ipset add " + setName + " " + ip
-	_, err := cmder.Exec_shell(cmd)
-	responeseWrap(err, c, ip, setName)
-}
-
-func addList(c *gin.Context) {
-	ListAdderAndDeleter(c, "add")
-}
-
-func deleteList(c *gin.Context) {
-	ListAdderAndDeleter(c, "del")
-}
-
-type ListAdderAndDeleterData struct {
-	AuthIpList   []string
-	PermitIpList []string
-}
-
-type ResponeseSetResponese struct {
-	Code   int
-	IpList []string
-}
-
-func ListAdderAndDeleter(c *gin.Context, action string) {
-	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-	var data ListAdderAndDeleterData
-	if c.ShouldBind(&data) == nil {
-		var (
-			// cmd初始化，因为第一个命令前有个&&，所以需要前置一个无意义的命令
-			authCmd    = "takePlace=0"
-			permitCmd  = "takePlace=0"
-			authCode   = 0
-			permitCode = 0
-		)
-		for _, ip := range data.AuthIpList {
-			authCmd = authCmd + "&&ipset " + action + " Auth " + ip
-		}
-		if authCmd != "takePlace=0" {
-			_, err := cmder.Exec_shell(authCmd)
-			if err != nil {
-				authCode = 1
+	var (
+		ip     = c.DefaultPostForm("ip", c.ClientIP())
+		code   = 0
+		resErr ResErr
+	)
+	groupName, ok := dict.Load(ip)
+	if ok {
+		//判断所在group，然后从其组删除，然后在map中删除
+		if groupName == weixin {
+			if err := execAndDeleteMap(ip, "weixin", "del"); err != nil {
+				code = 1
+				resErr.Msg = resErr.Msg + err.Error()
+			}
+		} else {
+			if err := execAndDeleteMap(ip, "all", "del"); err != nil {
+				code = 1
+				resErr.Msg = resErr.Msg + err.Error()
 			}
 		}
-		for _, ip := range data.PermitIpList {
-			permitCmd = permitCmd + "&&ipset " + action + " Permit " + ip
-		}
-		if permitCmd != "takePlace=0" {
-			_, err := cmder.Exec_shell(permitCmd)
-			if err != nil {
-				permitCode = 1
-			}
-		}
-		c.JSON(200, gin.H{
-			//"auth": ResponeseSetResponese{
-			//	Code:   authCode,
-			//	IpList: data.AuthIpList,
-			//},
-			"authCode":   authCode,
-			"permitCode": permitCode,
-		})
-	}
-}
-
-/*
-{
-"SetFrom": "auth",
-"SetTo": "permit",
-"IpList": ["1.1.1.1","4.4.4.4"]
-}
-*/
-
-type MoveSetListData struct {
-	SetFrom string
-	SetTo   string
-	IpList  []string
-}
-
-func moveSetList(c *gin.Context) {
-	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-	var data MoveSetListData
-	if c.ShouldBind(&data) == nil {
-		var (
-			cmd  = "takePlace=0"
-			code = 0
-		)
-		if strings.ToLower(data.SetFrom) == "none" && strings.ToLower(data.SetTo) == "auth" {
-			for _, ip := range data.IpList {
-				cmd = cmd + "&&ipset add Auth " + ip
-			}
-			if cmd != "takePlace=0" {
-				_, err := cmder.Exec_shell(cmd)
-				if err != nil {
-					code = 1
-				}
-			}
-		}
-		if strings.ToLower(data.SetFrom) == "auth" && strings.ToLower(data.SetTo) == "permit" {
-			for _, ip := range data.IpList {
-				cmd = cmd + "&&ipset del Auth " + ip + " && ipset add Permit " + ip
-			}
-			if cmd != "takePlace=0" {
-				_, err := cmder.Exec_shell(cmd)
-				if err != nil {
-					code = 1
-				}
-			}
-		}
-		if strings.ToLower(data.SetFrom) == "auth" && strings.ToLower(data.SetTo) == "none" {
-			for _, ip := range data.IpList {
-				cmd = cmd + "&&ipset del Auth " + ip
-			}
-			if cmd != "takePlace=0" {
-				_, err := cmder.Exec_shell(cmd)
-				if err != nil {
-					code = 1
-				}
-			}
-		}
-		if strings.ToLower(data.SetFrom) == "permit" && strings.ToLower(data.SetTo) == "none" {
-			for _, ip := range data.IpList {
-				cmd = cmd + "&&ipset del Permit " + ip
-			}
-			if cmd != "takePlace=0" {
-				_, err := cmder.Exec_shell(cmd)
-				if err != nil {
-					code = 1
-				}
-			}
-		}
-		c.JSON(200, gin.H{
-			"code":    code,
-			"setFrom": data.SetFrom,
-			"setTo":   data.SetTo,
-		})
-	}
-}
-
-func responeseWrap(err error, c *gin.Context, ip string, setName string) {
-	code := 0
-	if err != nil {
+	} else {
+		resErr.Msg = fmt.Errorf("this ip %s is not exist in weixin or all", ip).Error()
 		code = 1
-		fmt.Println(err)
 	}
+
 	c.JSON(200, gin.H{
-		"code":    code,
-		"ip":      ip,
-		"setName": setName,
+		"code":  code,
+		"err":   resErr,
+		"ip":    ip,
+		"group": groupName,
 	})
+}
+
+func getMap(c *gin.Context) {
+	res := ""
+	dict.Range(func(key, value interface{}) bool {
+		res += fmt.Errorf("%s-->%d\n", key, value).Error()
+		return true
+	})
+	c.String(200, res)
 }

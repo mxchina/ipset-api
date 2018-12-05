@@ -32,14 +32,22 @@
 <script>
     $(function () {
         var urlBase = "http://172.16.10.80:9800/"
+
+        function getData(f, to) {
+            return JSON.stringify({
+                "ip": "",
+                "setFrom": f,
+                "setTo": to,
+            })
+        }
         getSet()
         $("#noneToAuth").click(function () {
             $.ajax({
                 type: "POST",
                 url: urlBase + "moveSet",
-                contentType: "application/x-www-form-urlencoded",
+                contentType: "application/json;charset=UTF-8",
                 dataType: "json", //表示返回值类型，不必须
-                data: "setFrom=none&setTo=Auth",
+                data: getData("none", "auth"),
                 success: function (data) {
                     $("#resultView2").text("")
                     $("#resultView3").text("")
@@ -54,9 +62,9 @@
             $.ajax({
                 type: "POST",
                 url: urlBase + "moveSet",
-                contentType: "application/x-www-form-urlencoded",
+                contentType: "application/json;charset=UTF-8",
                 dataType: "json", //表示返回值类型，不必须
-                data: "setFrom=auth&setTo=none",
+                data: getData("auth", "none"),
                 success: function (data) {
                     $("#resultView1").text("")
                     $("#resultView3").text("")
@@ -71,9 +79,9 @@
             $.ajax({
                 type: "POST",
                 url: urlBase + "moveSet",
-                contentType: "application/x-www-form-urlencoded",
+                contentType: "application/json;charset=UTF-8",
                 dataType: "json", //表示返回值类型，不必须
-                data: "setFrom=auth&setTo=permit",
+                data: getData("auth", "permit"),
                 success: function (data) {
                     $("#resultView1").text("")
                     $("#resultView2").text("")
@@ -88,9 +96,9 @@
             $.ajax({
                 type: "POST",
                 url: urlBase + "moveSet",
-                contentType: "application/x-www-form-urlencoded",
+                contentType: "application/json;charset=UTF-8",
                 dataType: "json", //表示返回值类型，不必须
-                data: "setFrom=permit&setTo=none",
+                data: getData("permit", "none"),
                 success: function (data) {
                     $("#resultView2").text("")
                     $("#resultView3").text("")

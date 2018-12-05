@@ -114,3 +114,42 @@ Content-Type: application/json
 #  "SetTo": "permit"
 #}
 ###
+POST 172.16.10.80:9800/moveSet HTTP/1.1
+Content-Type: application/json
+
+#ip=aaaaaaaa4&setName=Auth
+{
+  "ip": "1.1.1.1",
+  "SetFrom": "none",
+  "SetTo": "auth"
+}
+
+###
+
+POST 172.16.10.80:9800/add HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+#ip=aaaaaaaa4&setName=Auth
+ip=1.4.2.1&group=weixin
+
+#####
+POST 172.16.10.80:9800/add HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+#ip=aaaaaaaa4&setName=Auth
+ip=2.2.2.1&group=all
+
+###
+POST 172.16.10.80:9800/del HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+#ip=aaaaaaaa4&setName=Auth
+ip=3.1.1.1
+
+###
+GET 172.16.10.80:9800/map-info HTTP/1.1
+
+#ip=aaaaaaaa4&setName=Auth
+
+
+###
