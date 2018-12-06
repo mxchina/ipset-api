@@ -13,6 +13,10 @@
         .status {
             background-color: #cccccc;
         }
+
+        button {
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -20,85 +24,62 @@
     当前所在组：
     <div class="group"></div>
 </div>
-<button id="noneToAuth">认证到auth组</button>
+<button id="noneToAuth">认证到weixin组</button>
 <div id="resultView1"></div>
-<button id="authToNone">从auth组剔除</button>
-<div id="resultView2"></div>
-<button id="authToPermit">auth组认证到permit组</button>
+<button id="authToPermit">认证到all组</button>
 <div id="resultView3"></div>
-<button id="PermitToNone">从permit组剔除</button>
+<button id="PermitToNone">下线</button>
 <div id="resultView4"></div>
 
 <script>
     $(function () {
         var urlBase = "http://172.16.10.80:9800/"
+        // var urlBase = "http://10.154.55.20:9800/"
 
-        function getData(f, to) {
-            return JSON.stringify({
-                "ip": "",
-                "setFrom": f,
-                "setTo": to,
-            })
-        }
         getSet()
         $("#noneToAuth").click(function () {
             $.ajax({
                 type: "POST",
-                url: urlBase + "moveSet",
-                contentType: "application/json;charset=UTF-8",
+                url: urlBase + "add",
+                contentType: "application/x-www-form-urlencoded",
                 dataType: "json", //表示返回值类型，不必须
-                data: getData("none", "auth"),
+                data: "group=weixin",
                 success: function (data) {
                     $("#resultView2").text("")
                     $("#resultView3").text("")
                     $("#resultView4").text("")
                     $("#resultView1").text("结果：" + JSON.stringify(data))
-                    $(".group").text("auth")
+                    $(".group").text("weixin")
                     getSet()
                 }
             })
         })
-        $("#authToNone").click(function () {
-            $.ajax({
-                type: "POST",
-                url: urlBase + "moveSet",
-                contentType: "application/json;charset=UTF-8",
-                dataType: "json", //表示返回值类型，不必须
-                data: getData("auth", "none"),
-                success: function (data) {
-                    $("#resultView1").text("")
-                    $("#resultView3").text("")
-                    $("#resultView4").text("")
-                    $("#resultView2").text("结果：" + JSON.stringify(data))
-                    $(".group").text("none")
-                    getSet()
-                }
-            })
-        })
+
         $("#authToPermit").click(function () {
             $.ajax({
                 type: "POST",
-                url: urlBase + "moveSet",
-                contentType: "application/json;charset=UTF-8",
+                url: urlBase + "add",
+                contentType: "application/x-www-form-urlencoded",
                 dataType: "json", //表示返回值类型，不必须
-                data: getData("auth", "permit"),
+                data: "group=all",
                 success: function (data) {
                     $("#resultView1").text("")
                     $("#resultView2").text("")
                     $("#resultView4").text("")
                     $("#resultView3").text("结果：" + JSON.stringify(data))
-                    $(".group").text("permit")
+                    $(".group").text("all")
                     getSet()
                 }
             })
         })
+
         $("#PermitToNone").click(function () {
             $.ajax({
                 type: "POST",
-                url: urlBase + "moveSet",
-                contentType: "application/json;charset=UTF-8",
+                url: urlBase + "del",
+                contentType: "application/x-www-form-urlencoded",
                 dataType: "json", //表示返回值类型，不必须
-                data: getData("permit", "none"),
+                data: "",
                 success: function (data) {
                     $("#resultView2").text("")
                     $("#resultView3").text("")
@@ -113,15 +94,13 @@
         function getSet() {
             $.ajax({
                 type: "GET",
-                url: urlBase + "setFromIP",
+                url: urlBase + "group-by-ip",
                 dataType: "json", //表示返回值类型，不必须
                 success: function (data) {
                     if (data.code === 0) {
-                        $(".group").text(data.setName)
-                    } else if (data.code === 1) {
-                        $(".group").text("none")
-                    } else {
-                        $(".group").text("请求setName信息失败")
+                        $(".group").text(data.group)
+                    }else {
+                        $(".group").text("请求groupName失败")
                     }
                 }
             })
@@ -129,7 +108,6 @@
     })
 
 </script>
-
 
 </body>
 </html>

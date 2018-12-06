@@ -9,19 +9,14 @@ import (
 	"sync"
 )
 
-/*
-POST /post?id=1234&page=1 HTTP/1.1
-Content-Type: application/x-www-form-urlencoded
-
-name=manu&message=this_is_great
-*/
-
 func main() {
 	router := gin.Default()
 
 	mapInit()
+	//go checkSync()
 	router.GET("/membersFromSet", getMembers)
-	router.GET("/map-info", getMap)
+	router.GET("/online-info", getMapInfo)
+	router.GET("/group-by-ip", getGroup)
 	router.POST("/add", adder)
 	router.POST("/del", deleter)
 	router.OPTIONS("/*matchAllOptions", corsOptionsAllow)
@@ -69,6 +64,30 @@ func getMembers(c *gin.Context) {
 	}
 }
 
+func getGroup(c *gin.Context) {
+	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+	ip := c.DefaultQuery("ip", c.ClientIP())
+	var (
+		group string
+	)
+	value, ok := dict.Load(ip)
+	if ok {
+		//在weixin 或 all中
+		if value == weixin {
+			group = "weixin"
+		} else {
+			group = "all"
+		}
+	} else {
+		group = "none"
+	}
+	c.JSON(200, gin.H{
+		"code":  0,
+		"ip":    ip,
+		"group": group,
+	})
+}
+
 const (
 	weixin int8 = 1
 	all    int8 = 2
@@ -76,10 +95,6 @@ const (
 
 //map[string]int8
 var dict sync.Map
-
-type ResErr struct {
-	Msg string
-}
 
 func mapInit() {
 	var (
@@ -97,16 +112,18 @@ func mapInit() {
 			weixinRE = regexp.MustCompile(`Name: weixin[\s\S]*Members:\n([\s\S]*)\n`)
 		}
 		if strings.HasSuffix(split[len(split)-1], "all") {
-			allRE = regexp.MustCompile(`Name: weixin[\s\S]*Members:\n([\s\S]*)\n`)
+			allRE = regexp.MustCompile(`Name: all[\s\S]*Members:\n([\s\S]*)\n`)
 		}
 	} else {
 		panic(err)
+		fmt.Printf("初始化失败：%s", groupList)
 	}
 
 	//获取weixin和set两个组中的IP列表
 	text, err := cmder.Exec_shell("ipset list")
 	if err != nil {
 		panic(err)
+		fmt.Printf("初始化失败：%s", text)
 	}
 	weixinList := weixinRE.FindStringSubmatch(text)
 	allList := allRE.FindStringSubmatch(text)
@@ -152,18 +169,18 @@ func setMap(ip string, group string) error {
 
 func execAndSetMap(ip, group, action string) error {
 	cmd := "ipset " + action + " " + group + " " + ip
-	_, err := cmder.Exec_shell(cmd)
+	cmdOut, err := cmder.Exec_shell(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf(cmdOut)
 	}
 	return setMap(ip, group)
 }
 
 func execAndDeleteMap(ip, group, action string) error {
 	cmd := "ipset " + action + " " + group + " " + ip
-	_, err := cmder.Exec_shell(cmd)
+	cmdOut, err := cmder.Exec_shell(cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf(cmdOut)
 	}
 	dict.Delete(ip)
 	return nil
@@ -174,12 +191,12 @@ func adder(c *gin.Context) {
 	var (
 		ip     = c.DefaultPostForm("ip", c.ClientIP())
 		group  = strings.ToLower(c.PostForm("group"))
-		resErr ResErr
+		resErr string
 		code   = 0
 	)
 	if group != "weixin" && group != "all" {
 		code = 1
-		resErr.Msg = fmt.Errorf("group require weixin or all，got %q", group).Error()
+		resErr = fmt.Errorf("group require weixin or all，got %q", group).Error()
 	} else {
 		groupName, ok := dict.Load(ip)
 		if ok {
@@ -188,11 +205,11 @@ func adder(c *gin.Context) {
 				// 从weixin组到all组，1 从weixin组删除ip 2 添加ip到all组
 				if err := execAndSetMap(ip, "weixin", "del"); err != nil {
 					code = 1
-					resErr.Msg = resErr.Msg + err.Error()
+					resErr = resErr + err.Error()
 				} else {
 					if err := execAndSetMap(ip, "all", "add"); err != nil {
 						code = 1
-						resErr.Msg = resErr.Msg + err.Error()
+						resErr = resErr + err.Error()
 					}
 				}
 			}
@@ -200,11 +217,11 @@ func adder(c *gin.Context) {
 				//从all组到weixin组，1从all组删除ip 2添加ip到weixin组
 				if err := execAndSetMap(ip, "all", "del"); err != nil {
 					code = 1
-					resErr.Msg = resErr.Msg + err.Error()
+					resErr = resErr + err.Error()
 				} else {
 					if err := execAndSetMap(ip, "weixin", "add"); err != nil {
 						code = 1
-						resErr.Msg = resErr.Msg + err.Error()
+						resErr = resErr + err.Error()
 					}
 				}
 			}
@@ -213,13 +230,13 @@ func adder(c *gin.Context) {
 			if group == "weixin" {
 				if err := execAndSetMap(ip, "weixin", "add"); err != nil {
 					code = 1
-					resErr.Msg = resErr.Msg + err.Error()
+					resErr = resErr + err.Error()
 				}
 			}
 			if group == "all" {
 				if err := execAndSetMap(ip, "all", "add"); err != nil {
 					code = 1
-					resErr.Msg = resErr.Msg + err.Error()
+					resErr = resErr + err.Error()
 				}
 			}
 		}
@@ -238,24 +255,27 @@ func deleter(c *gin.Context) {
 	var (
 		ip     = c.DefaultPostForm("ip", c.ClientIP())
 		code   = 0
-		resErr ResErr
+		resErr string
+		group  string
 	)
 	groupName, ok := dict.Load(ip)
 	if ok {
 		//判断所在group，然后从其组删除，然后在map中删除
 		if groupName == weixin {
+			group = "weixin"
 			if err := execAndDeleteMap(ip, "weixin", "del"); err != nil {
 				code = 1
-				resErr.Msg = resErr.Msg + err.Error()
+				resErr = resErr + err.Error()
 			}
 		} else {
+			group = "all"
 			if err := execAndDeleteMap(ip, "all", "del"); err != nil {
 				code = 1
-				resErr.Msg = resErr.Msg + err.Error()
+				resErr = resErr + err.Error()
 			}
 		}
 	} else {
-		resErr.Msg = fmt.Errorf("this ip %s is not exist in weixin or all", ip).Error()
+		resErr = fmt.Errorf("this ip %s is not exist in weixin or all", ip).Error()
 		code = 1
 	}
 
@@ -263,15 +283,26 @@ func deleter(c *gin.Context) {
 		"code":  code,
 		"err":   resErr,
 		"ip":    ip,
-		"group": groupName,
+		"group": group,
 	})
 }
 
-func getMap(c *gin.Context) {
-	res := ""
+func getMapInfo(c *gin.Context) {
+	var (
+		weixinCount int
+		allCount    int
+	)
 	dict.Range(func(key, value interface{}) bool {
-		res += fmt.Errorf("%s-->%d\n", key, value).Error()
+		//res += fmt.Sprintf("%s-->%s\n", key, group2str(tmpValue))
+		if value.(int8) == 1 {
+			weixinCount += 1
+		} else {
+			allCount += 1
+		}
 		return true
 	})
-	c.String(200, res)
+	c.JSON(200, gin.H{
+		"weixinCount": weixinCount,
+		"allCount":    allCount,
+	})
 }
