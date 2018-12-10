@@ -4,21 +4,27 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"go_firewall/cmder"
+	"log"
 	"regexp"
 	"strings"
 	"sync"
 )
 
+func init() {
+	mapInit()
+
+	// TODO:
+	// go checkSync()
+}
+
 func main() {
 	router := gin.Default()
 
-	mapInit()
-	//go checkSync()
 	router.GET("/membersFromSet", getMembers)
 	router.GET("/online-info", getMapInfo)
 	router.GET("/group-by-ip", getGroup)
-	router.POST("/add", adder)
-	router.POST("/del", deleter)
+	router.GET("/change-group", changeGroup)
+	//router.POST("/del", deleter)
 	router.OPTIONS("/*matchAllOptions", corsOptionsAllow)
 
 	router.Run(":9800")
@@ -47,7 +53,7 @@ func getMembers(c *gin.Context) {
 	case "permit":
 		RE = regexp.MustCompile(`Name: Permit.*Members:\\n(.*?)\\n\\nName: Weixin`)
 	}
-	if err != nil {
+	if err == nil {
 		result := RE.FindStringSubmatch(text)
 		var ipList []string
 		if len(result) >= 2 {
@@ -73,8 +79,8 @@ func getGroup(c *gin.Context) {
 	value, ok := dict.Load(ip)
 	if ok {
 		//在weixin 或 all中
-		if value == weixin {
-			group = "weixin"
+		if value == whiteListInMap {
+			group = "white_list_client"
 		} else {
 			group = "all"
 		}
@@ -89,18 +95,23 @@ func getGroup(c *gin.Context) {
 }
 
 const (
-	weixin int8 = 1
-	all    int8 = 2
+	whiteListInMap     int8   = 1
+	allInMap           int8   = 2
+	whiteListInRequest string = "60010"
+	nullInRequest      string = ""
+	whiteListName      string = "white_list_src" //whiteList在linux中的ipset中的组名，执行shell命令需要
+	allName            string = "all"            //all在linux中的ipset中的组名，执行shell命令需要
 )
 
-//map[string]int8
+//全局变量map[string]int8,保存各组ip信息
 var dict sync.Map
 
+//初始化服务器中的weixin和all组的ip到内存中保存
 func mapInit() {
 	var (
 		//注意[\s\S]才能匹配任意字符，.匹配不到\n换行符
-		weixinRE = regexp.MustCompile(`Name: weixin[\s\S]*Members:\n([\s\S]*)\n\nName`)
-		allRE    = regexp.MustCompile(`Name: all[\s\S]*Members:\n([\s\S]*)\n\nName`)
+		whiteListRE = regexp.MustCompile(`Name: white_list_src[\s\S]*?Members:\n([\s\S]*?)\n\nName`)
+		allRE       = regexp.MustCompile(`Name: all[\s\S]*?Members:\n([\s\S]*?)\n\nName`)
 	)
 	//先判断weixin和all两个组，在服务器上ipset list命令后，所显示的位置。
 	//如果有一个组在最后，那么获取该组IP列表的正则表达式不一样。go好像不支持正则表达式(?:)
@@ -108,35 +119,38 @@ func mapInit() {
 	if err == nil {
 		groupList = strings.TrimSpace(groupList)
 		split := strings.Split(groupList, "\n")
-		if strings.HasSuffix(split[len(split)-1], "weixin") {
-			weixinRE = regexp.MustCompile(`Name: weixin[\s\S]*Members:\n([\s\S]*)\n`)
+		if strings.HasSuffix(split[len(split)-1], "white_list_src") {
+			whiteListRE = regexp.MustCompile(`Name: white_list_src[\s\S]*?Members:\n([\s\S]*)\n`)
 		}
 		if strings.HasSuffix(split[len(split)-1], "all") {
-			allRE = regexp.MustCompile(`Name: all[\s\S]*Members:\n([\s\S]*)\n`)
+			allRE = regexp.MustCompile(`Name: all[\s\S]*?Members:\n([\s\S]*)\n`)
 		}
 	} else {
-		panic(err)
-		fmt.Printf("初始化失败：%s", groupList)
+		log.Printf("初始化失败：%s", groupList)
+		log.Fatal(err)
 	}
+	//log.Println(fmt.Sprintf("whiteListRE:%s", whiteListRE.String()))
+	//log.Println(fmt.Sprintf("allListRE:%s", allRE.String()))
 
-	//获取weixin和set两个组中的IP列表
+	//获取white_list_client和all两个组中的IP列表
 	text, err := cmder.Exec_shell("ipset list")
 	if err != nil {
-		panic(err)
-		fmt.Printf("初始化失败：%s", text)
+		log.Printf("初始化失败：%s", text)
+		log.Fatal(err)
 	}
-	weixinList := weixinRE.FindStringSubmatch(text)
+	whiteList := whiteListRE.FindStringSubmatch(text)
 	allList := allRE.FindStringSubmatch(text)
-
+	//log.Println(fmt.Sprintf("whiteList:%s", whiteList))
+	//log.Println(fmt.Sprintf("allList:%s", allList))
 	var (
-		weixinIpList []string
-		allIpList    []string
+		whiteIpList []string
+		allIpList   []string
 	)
 
-	if len(weixinList) >= 2 {
-		weixinIpList = strings.Split(weixinList[1], "\n")
+	if len(whiteList) >= 2 {
+		whiteIpList = strings.Split(whiteList[1], "\n")
 	} else {
-		weixinIpList = []string{}
+		whiteIpList = []string{}
 	}
 
 	if len(allList) >= 2 {
@@ -144,26 +158,27 @@ func mapInit() {
 	} else {
 		allIpList = []string{}
 	}
+	//log.Println(fmt.Sprintf("whiteIpList:%s", whiteIpList))
+	//log.Println(fmt.Sprintf("allIpList:%s", allIpList))
 
 	//遍历添加两个组中的ip到map中，同步服务器ipset数据，完成初始化
-	for _, ip := range weixinIpList {
-		dict.Store(ip, weixin)
+	for _, ip := range whiteIpList {
+		dict.Store(ip, whiteListInMap)
 	}
 	for _, ip := range allIpList {
-		dict.Store(ip, all)
+		dict.Store(ip, allInMap)
 	}
 
 }
 
 func setMap(ip string, group string) error {
-	if group == "weixin" {
-		dict.Store(ip, weixin)
-		return nil
-	} else if group == "all" {
-		dict.Store(ip, all)
+	//group == "all" || group == "white_list_client"
+	if group == "all" {
+		dict.Store(ip, allInMap)
 		return nil
 	} else {
-		return fmt.Errorf("setMap error：group %q not exist", group)
+		dict.Store(ip, whiteListInMap)
+		return nil
 	}
 }
 
@@ -186,123 +201,117 @@ func execAndDeleteMap(ip, group, action string) error {
 	return nil
 }
 
-func adder(c *gin.Context) {
+func changeGroup(c *gin.Context) {
 	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 	var (
-		ip     = c.DefaultPostForm("ip", c.ClientIP())
-		group  = strings.ToLower(c.PostForm("group"))
-		resErr string
-		code   = 0
+		kind          = strings.ToLower(c.Query("kind"))
+		userIp        = c.DefaultQuery("userIp", c.ClientIP())
+		userGroupName = strings.ToLower(c.DefaultQuery("userGroupName", nullInRequest))
+		resErr        string //错误收集，可以打印到日志，也可以返回到responese
+		statusCode    = 1    //1表示成功，0表示失败
 	)
-	if group != "weixin" && group != "all" {
-		code = 1
-		resErr = fmt.Errorf("group require weixin or all，got %q", group).Error()
-	} else {
-		groupName, ok := dict.Load(ip)
+	groupNameInMap, ok := dict.Load(userIp)
+	if kind == "prelogin" && userGroupName != nullInRequest {
 		if ok {
 			// ok表示ip已经在map中
-			if groupName == weixin && group == "all" {
-				// 从weixin组到all组，1 从weixin组删除ip 2 添加ip到all组
-				if err := execAndSetMap(ip, "weixin", "del"); err != nil {
-					code = 1
+			if groupNameInMap == whiteListInMap && userGroupName != whiteListInRequest {
+				// userGroupName != null 表示要么放通，要么到白名单
+				// 从whiteListInMap组到all组，1 从whiteList组删除ip 2 添加ip到all组
+				if err := execAndSetMap(userIp, whiteListName, "del"); err != nil {
+					statusCode = 0
 					resErr = resErr + err.Error()
 				} else {
-					if err := execAndSetMap(ip, "all", "add"); err != nil {
-						code = 1
+					if err := execAndSetMap(userIp, allName, "add"); err != nil {
+						statusCode = 0
 						resErr = resErr + err.Error()
 					}
 				}
 			}
-			if groupName == all && group == "weixin" {
-				//从all组到weixin组，1从all组删除ip 2添加ip到weixin组
-				if err := execAndSetMap(ip, "all", "del"); err != nil {
-					code = 1
+			if groupNameInMap != whiteListInMap && userGroupName == whiteListInRequest {
+				//从all组到whiteList组，1从all组删除ip 2添加ip到whiteList组
+				if err := execAndSetMap(userIp, allName, "del"); err != nil {
+					statusCode = 0
 					resErr = resErr + err.Error()
 				} else {
-					if err := execAndSetMap(ip, "weixin", "add"); err != nil {
-						code = 1
+					if err := execAndSetMap(userIp, whiteListName, "add"); err != nil {
+						statusCode = 0
 						resErr = resErr + err.Error()
 					}
 				}
 			}
 		} else {
 			// ip不在map中，也就是不在任何组中
-			if group == "weixin" {
-				if err := execAndSetMap(ip, "weixin", "add"); err != nil {
-					code = 1
+			if userGroupName == whiteListInRequest {
+				if err := execAndSetMap(userIp, whiteListName, "add"); err != nil {
+					statusCode = 0
 					resErr = resErr + err.Error()
 				}
 			}
-			if group == "all" {
-				if err := execAndSetMap(ip, "all", "add"); err != nil {
-					code = 1
+			if userGroupName != whiteListInRequest {
+				if err := execAndSetMap(userIp, allName, "add"); err != nil {
+					statusCode = 0
 					resErr = resErr + err.Error()
 				}
 			}
 		}
-	}
 
-	c.JSON(200, gin.H{
-		"code":  code,
-		"err":   resErr,
-		"ip":    ip,
-		"group": group,
-	})
-}
-
-func deleter(c *gin.Context) {
-	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-	var (
-		ip     = c.DefaultPostForm("ip", c.ClientIP())
-		code   = 0
-		resErr string
-		group  string
-	)
-	groupName, ok := dict.Load(ip)
-	if ok {
-		//判断所在group，然后从其组删除，然后在map中删除
-		if groupName == weixin {
-			group = "weixin"
-			if err := execAndDeleteMap(ip, "weixin", "del"); err != nil {
-				code = 1
-				resErr = resErr + err.Error()
+	} else if kind == "logout" || userGroupName == nullInRequest {
+		if ok {
+			//判断所在group，然后从其组删除，然后在map中删除
+			if groupNameInMap == whiteListInMap {
+				//在白名单组中，从该组中删掉该ip，然后在map中删除
+				if err := execAndDeleteMap(userIp, whiteListName, "del"); err != nil {
+					statusCode = 0
+					resErr = resErr + err.Error()
+				}
+			} else {
+				//在all组中，从all组删掉该ip，然后在map中删除
+				if err := execAndDeleteMap(userIp, allName, "del"); err != nil {
+					statusCode = 0
+					resErr = resErr + err.Error()
+				}
 			}
 		} else {
-			group = "all"
-			if err := execAndDeleteMap(ip, "all", "del"); err != nil {
-				code = 1
-				resErr = resErr + err.Error()
-			}
+			resErr = fmt.Sprintf("this ip %s is not exist in whiteList or all group", userIp)
+			statusCode = 0
 		}
 	} else {
-		resErr = fmt.Errorf("this ip %s is not exist in weixin or all", ip).Error()
-		code = 1
+		//kind err or userGroupName err
+		resErr = fmt.Sprintf("parameter kind: %s not match parameter userGroupName: %s", kind, userGroupName)
+		statusCode = 0
 	}
 
-	c.JSON(200, gin.H{
-		"code":  code,
-		"err":   resErr,
-		"ip":    ip,
-		"group": group,
-	})
+	if resErr != "" {
+		log.Println(resErr)
+	}
+
+	c.String(200, fmt.Sprintf("%d:msg", statusCode))
 }
 
 func getMapInfo(c *gin.Context) {
 	var (
-		weixinCount int
-		allCount    int
+		whiteListCount int
+		allCount       int
+		res            string
 	)
 	dict.Range(func(key, value interface{}) bool {
-		//res += fmt.Sprintf("%s-->%s\n", key, group2str(tmpValue))
-		if value.(int8) == 1 {
-			weixinCount += 1
+		res += fmt.Sprintf("%s-->%s\n", key, group2str(value))
+		if value.(int8) == whiteListInMap {
+			whiteListCount += 1
 		} else {
 			allCount += 1
 		}
 		return true
 	})
-	c.JSON(200, gin.H{
-		"weixinCount": weixinCount,
-		"allCount":    allCount,
-	})
+	c.String(200, fmt.Sprintf(
+		"info:\n%s\nwhiteListCount:%d\nallCount:%d\n",
+		res, whiteListCount, allCount))
+}
+
+func group2str(tmpValue interface{}) interface{} {
+	if tmpValue == whiteListInMap {
+		return "whiteList"
+	} else {
+		return "all"
+	}
 }

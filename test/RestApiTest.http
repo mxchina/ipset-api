@@ -152,4 +152,14 @@ GET 172.16.10.80:9800/online-info HTTP/1.1
 #ip=aaaaaaaa4&setName=Auth
 
 
+#userGroupName
+# 60010:whiteList  "":下线   其他:all
+###kind=preLogin&userIp=1.1.1.1&userGroupName=60010
+GET 172.16.10.80:9800/change-group?kind=preLogin&userIp=1.1.1.1&userGroupName=123 HTTP/1.1
+
+###
+
+###kind=preLogin&userIp=1.1.1.1&userGroupName=60010
+GET 172.16.10.80:9800/change-group?kind=logout&userIp=1.1.1.1&userGroupName=60010 HTTP/1.1
+
 ###

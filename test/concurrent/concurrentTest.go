@@ -9,7 +9,15 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unsafe"
 )
+
+/*
+编译为linux可用的程序
+set GOARCH=amd64
+set GOOS=linux
+go build
+*/
 
 func main() {
 	//addTest()
@@ -17,25 +25,49 @@ func main() {
 }
 
 func addTest() {
-	Test("http://172.16.10.80:9800/add")
+	Test("preLogin")
 }
 
 func delTest() {
-	Test("http://172.16.10.80:9800/del")
+	Test("logout")
 }
 
-func Test(url string) {
-	var count = 0
+func Test(kind string) {
+	var (
+		count = 0
+		ip    string
+		group = "60012310"
+		str   *string
+	)
 	for i := 0; i < 100; i++ {
 		for j := 0; j < 100; j++ {
-			result := httpPost(url,
-				"55.55."+strconv.Itoa(i)+"."+strconv.Itoa(j),
-				"weixin")
-			if result != 0 {
-				fmt.Printf("count%d，result---------------->%d\n", count, result)
-			} else {
-				fmt.Printf("count%d，result：%d\n", count, result)
+			//result := httpPost(url,
+			//	"55.55."+strconv.Itoa(i)+"."+strconv.Itoa(j),
+			//	"weixin")
+			ip = "55.55." + strconv.Itoa(i) + "." + strconv.Itoa(j)
+			resp, err := http.Get(fmt.Sprintf("http://172.16.10.80:9800/change-group?kind=%s&userIp=%s&userGroupName=%s", kind, ip, group))
+			if err != nil {
+				fmt.Printf("count%d，result---------------->%s\n", count, err.Error())
+				count++
+				continue
 			}
+			if resp.StatusCode != http.StatusOK {
+				fmt.Printf("count%d，status not ok ---------------->status%d\n", count, resp.StatusCode)
+				count++
+				continue
+			}
+			bytes, err := ioutil.ReadAll(bufio.NewReader(resp.Body))
+			str = (*string)(unsafe.Pointer(&bytes))
+			if err != nil {
+				fmt.Printf("count%d，result---------------->%s\n", count, err.Error())
+			} else {
+				if *str == "1:msg" {
+					fmt.Printf("count%d，result：%s\n", count, *str)
+				} else {
+					fmt.Printf("count%d，msg---------------->%s\n", count, *str)
+				}
+			}
+
 			count++
 		}
 	}
