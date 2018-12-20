@@ -1,13 +1,17 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"github.com/gin-gonic/gin"
-	"go_firewall/cmder"
+	"io"
+	"ipset-api/cmder"
 	"log"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 func init() {
@@ -17,8 +21,23 @@ func init() {
 	// go checkSync()
 }
 
+//compile for linux with mac
+//CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build apiServer.go
+
 func main() {
+	var logfile = flag.String("logfile", "/synet/gin.log", "set logfile and default is /synet/gin.log")
+	flag.Parse()
+
+	f, _ := os.Create(*logfile)
+	defer f.Close()
+
+	//set log default output and prefix
+	log.SetOutput(f)
+	log.SetPrefix(time.Now().Format("2006/01/02 - 15:04:05") + "-")
+
+	gin.DefaultWriter = io.MultiWriter(f)
 	router := gin.Default()
+	gin.Logger()
 
 	router.GET("/membersFromSet", getMembers)
 	router.GET("/online-info", getMapInfo)

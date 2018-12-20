@@ -45,7 +45,7 @@ func Test(kind string) {
 			//	"55.55."+strconv.Itoa(i)+"."+strconv.Itoa(j),
 			//	"weixin")
 			ip = "55.55." + strconv.Itoa(i) + "." + strconv.Itoa(j)
-			resp, err := http.Get(fmt.Sprintf("http://172.16.10.80:9800/change-group?kind=%s&userIp=%s&userGroupName=%s", kind, ip, group))
+			resp, err := http.Get(fmt.Sprintf("http://10.154.55.20:9800/change-group?kind=%s&userIp=%s&userGroupName=%s", kind, ip, group))
 			if err != nil {
 				fmt.Printf("count%d，result---------------->%s\n", count, err.Error())
 				count++

@@ -17,14 +17,20 @@
         button {
             cursor: pointer;
         }
+
+        p {
+            color: #990055;
+        }
     </style>
 </head>
 <body>
+<p>返回1:msg表示成功</p>
+<p>返回0:msg表示失败</p>
 <div class="status">
     当前所在组：
     <div class="group"></div>
 </div>
-<button id="noneToAuth">认证到weixin组</button>
+<button id="noneToAuth">认证到白名单组</button>
 <div id="resultView1"></div>
 <button id="authToPermit">认证到all组</button>
 <div id="resultView3"></div>
@@ -33,23 +39,26 @@
 
 <script>
     $(function () {
-        var urlBase = "http://172.16.10.80:9800/"
-        // var urlBase = "http://10.154.55.20:9800/"
+        var urlBase = "http://172.22.0.20:9800/"
+        // var urlBase = "http://10.255.247.65:9800/"
 
         getSet()
         $("#noneToAuth").click(function () {
             $.ajax({
-                type: "POST",
-                url: urlBase + "add",
-                contentType: "application/x-www-form-urlencoded",
-                dataType: "json", //表示返回值类型，不必须
-                data: "group=weixin",
+                type: "GET",
+                url: urlBase + "change-group?kind=preLogin&userGroupName=60010",
+                // contentType: "application/x-www-form-urlencoded",
+                // dataType: "json", //表示返回值类型，不必须
+                // data: "group=weixin",
                 success: function (data) {
                     $("#resultView2").text("")
                     $("#resultView3").text("")
                     $("#resultView4").text("")
-                    $("#resultView1").text("结果：" + JSON.stringify(data))
-                    $(".group").text("weixin")
+                    // $("#resultView1").text("结果：" + JSON.stringify(data))
+                    $("#resultView1").text("返回值：" + data)
+                    if (data === "1:msg") {
+                        $(".group").text("weixin")
+                    }
                     getSet()
                 }
             })
@@ -57,17 +66,20 @@
 
         $("#authToPermit").click(function () {
             $.ajax({
-                type: "POST",
-                url: urlBase + "add",
-                contentType: "application/x-www-form-urlencoded",
-                dataType: "json", //表示返回值类型，不必须
-                data: "group=all",
+                type: "GET",
+                url: urlBase + "change-group?kind=preLogin&userGroupName=111",
+                // contentType: "application/x-www-form-urlencoded",
+                // dataType: "json", //表示返回值类型，不必须
+                // data: "group=all",
                 success: function (data) {
                     $("#resultView1").text("")
                     $("#resultView2").text("")
                     $("#resultView4").text("")
-                    $("#resultView3").text("结果：" + JSON.stringify(data))
-                    $(".group").text("all")
+                    // $("#resultView3").text("结果：" + JSON.stringify(data))
+                    $("#resultView3").text("结果：" + data)
+                    if (data === "1:msg") {
+                        $(".group").text("all")
+                    }
                     getSet()
                 }
             })
@@ -75,17 +87,20 @@
 
         $("#PermitToNone").click(function () {
             $.ajax({
-                type: "POST",
-                url: urlBase + "del",
-                contentType: "application/x-www-form-urlencoded",
-                dataType: "json", //表示返回值类型，不必须
-                data: "",
+                type: "GET",
+                url: urlBase + "change-group?kind=logout",
+                // contentType: "application/x-www-form-urlencoded",
+                // dataType: "json", //表示返回值类型，不必须
+                // data: "",
                 success: function (data) {
                     $("#resultView2").text("")
                     $("#resultView3").text("")
                     $("#resultView1").text("")
-                    $("#resultView4").text("结果：" + JSON.stringify(data))
-                    $(".group").text("none")
+                    // $("#resultView4").text("结果：" + JSON.stringify(data))
+                    $("#resultView4").text("结果：" + data)
+                    if (data === "1:msg") {
+                        $(".group").text("none")
+                    }
                     getSet()
                 }
             })
@@ -99,7 +114,7 @@
                 success: function (data) {
                     if (data.code === 0) {
                         $(".group").text(data.group)
-                    }else {
+                    } else {
                         $(".group").text("请求groupName失败")
                     }
                 }
