@@ -25,7 +25,8 @@ func init() {
 //CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build apiServer.go
 
 func main() {
-	var logfile = flag.String("logfile", "/synet/gin.log", "set logfile and default is /synet/gin.log")
+	dateStr := time.Now().Format("2006-01-02")
+	var logfile = flag.String("logfile", "/synet/gin-"+dateStr+".log", "set logfile and default is /synet/gin-2018-xx-xx.log")
 	flag.Parse()
 
 	f, _ := os.Create(*logfile)
