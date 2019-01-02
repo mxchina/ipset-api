@@ -5,19 +5,19 @@ import (
 	"os/exec"
 )
 
-func Exec_shell(s string) (string, error) {
+func Exec_shell(cmd string) (string, error) {
 	//该函数执行一个shell命令，如果成功返回成功信息，err为nil
 	//如果执行命令失败，返回shell的stderr提示，且err不为nil（类似exit code 127）
-	cmd := exec.Command("/bin/bash", "-c", s)
+	cmdResult := exec.Command("/bin/bash", "-c", cmd)
 	var (
 		out    bytes.Buffer
 		errOut bytes.Buffer
 	)
 	// stdout获取标准输出，stderr获取错误输出
-	cmd.Stdout = &out
-	cmd.Stderr = &errOut
+	cmdResult.Stdout = &out
+	cmdResult.Stderr = &errOut
 
-	if err := cmd.Run(); err != nil {
+	if err := cmdResult.Run(); err != nil {
 		return errOut.String(), err
 	}
 	return out.String(), nil

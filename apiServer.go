@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"io"
+	"io/ioutil"
 	"ipset-api/cmder"
 	"log"
+	"net/http"
 	"os"
 	"regexp"
 	"strings"
@@ -14,80 +18,168 @@ import (
 	"time"
 )
 
-func init() {
-	mapInit()
-
-	// TODO:
-	// go checkSync()
-}
-
 //compile for linux with mac
 //CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build apiServer.go
 
-func main() {
-	dateStr := time.Now().Format("2006-01-02")
-	var logfile = flag.String("logfile", "/synet/gin-"+dateStr+".log", "set logfile and default is /synet/gin-2018-xx-xx.log")
-	flag.Parse()
+func init() {
+	logInit()
+	gin.SetMode(gin.ReleaseMode)
+	mapInit()
+	whiteListDstInit()
+}
 
-	f, _ := os.Create(*logfile)
-	defer f.Close()
+type GetResult struct {
+	LocalList []string
+}
+
+func whiteListDstInit() {
+	resp, err := http.Get(DNSAPI)
+	if err != nil {
+		log.Println("whiteListDstInit初始化连接DNS服务器失败，请注意启动DNS服务器的go程序：" + err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(bufio.NewReader(resp.Body))
+	if err != nil {
+		log.Fatal("whiteListDstInit读取get请求返回值ReadAll error：" + err.Error())
+	}
+
+	//反序列化请求结果到getResult中
+	var getResult GetResult
+	err = json.Unmarshal(body, &getResult)
+	if err != nil {
+		log.Fatal("whiteListDstInit Unmarshal error：" + err.Error())
+	}
+
+	var cmd string
+	for _, ip := range getResult.LocalList {
+		cmd = "ipset add white_list_dst " + ip
+		cmdResult, err := cmder.Exec_shell(cmd)
+		if err != nil && !checkStr(cmdResult) {
+			log.Fatalf("初始化添加ip：%s到white_list_dst失败，错误信息：%s。"+
+				"请将iptables和dns服务器上的go程序重启，添加ip为：", ip, err.Error())
+		}
+	}
+}
+
+//全局变量map[string]int8,保存各组ip信息
+//file 为日志文件
+var (
+	dict sync.Map
+	file *os.File
+)
+
+func main() {
+
+	defer file.Close()
 
 	//set log default output and prefix
-	log.SetOutput(f)
+	log.SetOutput(file)
 	log.SetPrefix(time.Now().Format("2006/01/02 - 15:04:05") + "-")
 
-	gin.DefaultWriter = io.MultiWriter(f)
+	gin.DefaultWriter = io.MultiWriter(file)
 	router := gin.Default()
 	gin.Logger()
 
-	router.GET("/membersFromSet", getMembers)
 	router.GET("/online-info", getMapInfo)
 	router.GET("/group-by-ip", getGroup)
 	router.GET("/change-group", changeGroup)
+	router.POST("/add-iplist", addIpList)
 	//router.POST("/del", deleter)
 	router.OPTIONS("/*matchAllOptions", corsOptionsAllow)
 
 	router.Run(":9800")
 }
 
+func logInit() {
+	dateStr := time.Now().Format(`2006-01-02-15`)
+	var (
+		logDir  = "/synet/logs"
+		logfile = flag.String("logfile",
+			logDir+"/go-"+dateStr+".log",
+			"set logfile and default is "+logDir+"/go-年-月-日-时.log")
+	)
+	flag.Parse()
+	exist, err := PathExists(logDir)
+	if err != nil {
+		log.Fatal("判断日志目录是否存在，失败：" + err.Error())
+	}
+	if !exist {
+		if err := os.Mkdir(logDir, os.ModePerm); err != nil {
+			log.Fatal("日志目录创建失败：" + err.Error())
+		}
+	}
+	file, err = os.OpenFile(*logfile, os.O_CREATE|os.O_APPEND|os.O_RDWR, os.ModePerm|os.ModeTemporary)
+	if err != nil {
+		log.Fatal("日志文件创建失败：" + err.Error())
+	}
+}
+
+func PathExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
+
+type addListData struct {
+	GroupName string
+	IpList    []string
+}
+
+func addIpList(c *gin.Context) {
+	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+	var (
+		data        addListData
+		statusCode  = 0
+		ipList      []string
+		successList []string
+		groupName   string
+	)
+	if err := c.ShouldBind(&data); err == nil {
+		ipList = data.IpList
+		groupName = data.GroupName
+
+		var cmd string
+		for _, ip := range ipList {
+			cmd = "ipset add " + groupName + " " + ip
+			reslut, err := cmder.Exec_shell(cmd)
+			if err == nil || checkStr(reslut) {
+				successList = append(successList, ip)
+			}
+		}
+		if len(successList) != len(data.IpList) {
+			statusCode = 1
+		}
+		log.Printf("addIpList successList：%s", successList)
+
+		c.JSON(200, gin.H{
+			"status":      statusCode,
+			"successList": successList,
+			"groupName":   groupName,
+		})
+	}
+}
+
+//实现幂等
+func checkStr(s string) bool {
+	dst := `Element cannot be added to the set: it's already added`
+	index := strings.Index(s, dst)
+	if index != -1 {
+		return true
+	}
+	return false
+}
+
 func corsOptionsAllow(c *gin.Context) {
 	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 	c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 	c.JSON(200, nil)
-}
-
-func getMembers(c *gin.Context) {
-	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-	var (
-		setName = c.Query("group")
-		code    = 0
-		cmd     = "ipset list"
-		RE      *regexp.Regexp
-	)
-	text, err := cmder.Exec_shell(cmd)
-	switch strings.ToLower(setName) {
-	case "weixin":
-		RE = regexp.MustCompile(`Name: weixin.*Members:\\n(.*)\\n{\nName}.`)
-	case "auth":
-		RE = regexp.MustCompile(`Name: weixin.*Members:\\n(.*)\\n{\nName}.`)
-	case "permit":
-		RE = regexp.MustCompile(`Name: Permit.*Members:\\n(.*?)\\n\\nName: Weixin`)
-	}
-	if err == nil {
-		result := RE.FindStringSubmatch(text)
-		var ipList []string
-		if len(result) >= 2 {
-			ipList = strings.Split(result[1], "\\n")
-		} else {
-			ipList = []string{}
-		}
-
-		c.JSON(200, gin.H{
-			"code":    code,
-			"group":   setName,
-			"members": ipList,
-		})
-	}
 }
 
 func getGroup(c *gin.Context) {
@@ -115,19 +207,23 @@ func getGroup(c *gin.Context) {
 }
 
 const (
-	whiteListInMap     int8   = 1
-	allInMap           int8   = 2
+	DNSAPI              = "http://172.16.10.91:9800/local-list?kind=startSendData"
+	whiteListInMap int8 = 1
+	allInMap       int8 = 2
+	//当whiteListInRequest == 60010时，表示添加到白名单组，为空表示下线，为其他值表示添加到放通组
 	whiteListInRequest string = "60010"
 	nullInRequest      string = ""
-	whiteListName      string = "white_list_src" //whiteList在linux中的ipset中的组名，执行shell命令需要
-	allName            string = "all"            //all在linux中的ipset中的组名，执行shell命令需要
+	//whiteList在linux中的ipset中的组名，执行shell命令需要
+	whiteListName string = "white_list_src"
+	//all在linux中的ipset中的组名，执行shell命令需要
+	allName string = "all"
 )
-
-//全局变量map[string]int8,保存各组ip信息
-var dict sync.Map
 
 //初始化服务器中的weixin和all组的ip到内存中保存
 func mapInit() {
+	//首先判断是否存在white_list_src，white_list_dst，all_allow这几个组，如果不存在，创建
+	isIpsetCreated()
+
 	var (
 		//注意[\s\S]才能匹配任意字符，.匹配不到\n换行符
 		whiteListRE = regexp.MustCompile(`Name: white_list_src[\s\S]*?Members:\n([\s\S]*?)\n\nName`)
@@ -189,6 +285,45 @@ func mapInit() {
 		dict.Store(ip, allInMap)
 	}
 
+}
+
+func isIpsetCreated() {
+	cmdDst := `ipset list |grep "Name: white_list_dst"`
+	cmdSrc := `ipset list |grep "Name: white_list_src"`
+	cmdAll := `ipset list |grep "Name: allow_list"`
+	dstResult, err := cmder.Exec_shell(cmdDst)
+	if err != nil {
+		log.Println(err.Error())
+	}
+	if dstResult == "" {
+		log.Println("white_list_dst is not in ipset, now create this set...")
+		_, err := cmder.Exec_shell("ipset create white_list_dst hash:net family inet hashsize 4096 maxelem 1000000")
+		if err != nil {
+			panic(err)
+		}
+	}
+	srcResult, err := cmder.Exec_shell(cmdSrc)
+	if err != nil {
+		log.Println(err.Error())
+	}
+	if srcResult == "" {
+		log.Println("white_list_src is not in ipset, now create this set...")
+		_, err := cmder.Exec_shell("ipset create white_list_src hash:net family inet hashsize 4096 maxelem 1000000")
+		if err != nil {
+			panic(err)
+		}
+	}
+	allResult, err := cmder.Exec_shell(cmdAll)
+	if err != nil {
+		log.Println(err.Error())
+	}
+	if allResult == "" {
+		log.Println("allow_list is not in ipset, now create this set...")
+		_, err := cmder.Exec_shell("ipset create allow_list hash:net family inet hashsize 4096 maxelem 1000000")
+		if err != nil {
+			panic(err)
+		}
+	}
 }
 
 func setMap(ip string, group string) error {
